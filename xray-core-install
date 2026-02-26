@@ -1,0 +1,241 @@
+#!/bin/bash
+# basic check
+set -euo pipefail
+
+[[ $EUID -eq 0 ]] || { echo "Error: Run as root."; exit 1; }
+echo "Root: OK"
+[[ -d /run/systemd/system ]] || { echo "Error: Systemd is not running."; exit 1; }
+echo "Systemd: OK"
+if ss -ltnp 'sport = :443' | grep -q LISTEN; then
+    echo "WARNING: Port 443 is already in use."
+    read -p "Do you want to continue anyway? (y/N): " answer
+    [[ "$answer" =~ ^[Yy]$ ]] || { echo "Aborted."; exit 1; }
+else
+    echo "Ports 443 TCP: OK"
+fi
+
+# installing dependencies
+echo "Installing dependencies"
+apt update -y
+apt install qrencode curl jq -y
+
+# enabling BBR
+if sysctl net.ipv4.tcp_congestion_control | grep -q bbr; then
+    echo "BBR is already enabled."
+else
+    grep -q "net.core.default_qdisc=fq" /etc/sysctl.conf || \
+    echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
+    grep -q "net.ipv4.tcp_congestion_control=bbr" /etc/sysctl.conf || \
+    echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
+    sysctl -p
+    echo "BBR enabled: OK"
+fi
+
+# installing Xray
+bash -c "$(curl -4 -fSL https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
+shortsid=$(openssl rand -hex 8)
+
+echo "shortsid: $shortsid" > /usr/local/etc/xray/.keys
+xray x25519 >> /usr/local/etc/xray/.keys
+
+privatekey=$(awk -F': ' '/PrivateKey/ {print $2}' /usr/local/etc/xray/.keys)
+password=$(awk -F': ' '/Password/ {print $2}' /usr/local/etc/xray/.keys)
+
+# creating a configuratgion file
+cat << EOF > /usr/local/etc/xray/config.json
+{
+    "log": {
+        "loglevel": "warning"
+    },
+    "routing": {
+        "domainStrategy": "IPIfNonMatch",
+        "rules": [
+            {
+                "type": "field",
+                "domain": [
+                    "geosite:category-ads-all"
+                ],
+                "outboundTag": "block"
+            }
+        ]
+    },
+    "inbounds": [
+        {
+            "listen": "0.0.0.0",
+            "port": 443,
+            "protocol": "vless",
+            "settings": {
+                "clients": [],
+                "decryption": "none"
+            },
+            "streamSettings": {
+                "network": "tcp",
+                "security": "reality",
+                "realitySettings": {
+                    "show": false,
+                    "dest": "addons.mozilla.org:443",
+                    "xver": 0,
+                    "serverNames": [
+                        "addons.mozilla.org"
+                    ],
+                    "privateKey": "$privatekey",
+                    "minClientVer": "",
+                    "maxClientVer": "",
+                    "maxTimeDiff": 0,
+                    "shortIds": [
+                        "$shortsid"
+                    ]
+                }
+            },
+            "sniffing": {
+                "enabled": true,
+                "destOverride": [
+                    "http",
+                    "tls",
+                    "quic"
+                ]
+            }
+        }
+    ],
+    "outbounds": [
+        {
+            "protocol": "freedom",
+            "tag": "direct"
+        },
+        {
+            "protocol": "blackhole",
+            "tag": "block"
+        }
+    ],
+    "policy": {
+        "levels": {
+            "0": {
+                "handshake": 4,
+                "connIdle": 300
+            }
+        }
+    }
+}
+EOF
+
+chmod 644 /usr/local/etc/xray/config.json
+systemctl enable xray
+
+# userlist
+cat << 'EOF' > /usr/local/bin/userlist
+#!/bin/bash
+mapfile -t emails < <(jq -r '.inbounds[0].settings.clients[].email' /usr/local/etc/xray/config.json)
+[[ ${#emails[@]} -eq 0 ]] && { echo "Error: No clients found."; exit 1; }
+echo "Client list:"
+for i in "${!emails[@]}"; do
+    echo "$((i+1)). ${emails[$i]}"
+done
+EOF
+chmod +x /usr/local/bin/userlist
+
+# newuser
+cat << 'EOF' > /usr/local/bin/newuser
+#!/bin/bash
+read -p "Enter username (email): " email
+
+[[ -z "$email" || "$email" == *" "* ]] && { echo "Error: username cannot be empty or contain spaces."; exit 1; }
+
+exists=$(jq --arg eml "$email" '.inbounds[0].settings.clients[] | select(.email == $eml)' /usr/local/etc/xray/config.json)
+[[ -n "$exists" ]] && { echo "Error: user '$email' already exists."; exit 1; }
+
+uuid=$(xray uuid)
+tmp=$(mktemp)
+jq --arg email "$email" --arg uuid "$uuid" \
+  '.inbounds[0].settings.clients += [{"email": $email, "id": $uuid, "flow": "xtls-rprx-vision"}]' \
+  /usr/local/etc/xray/config.json > "$tmp" && mv "$tmp" /usr/local/etc/xray/config.json
+chmod 644 /usr/local/etc/xray/config.json
+systemctl restart xray
+
+protocol=$(jq -r '.inbounds[0].protocol' /usr/local/etc/xray/config.json)
+port=$(jq -r '.inbounds[0].port' /usr/local/etc/xray/config.json)
+sni=$(jq -r '.inbounds[0].streamSettings.realitySettings.serverNames[0]' /usr/local/etc/xray/config.json)
+pbk=$(awk -F': ' '/Password/ {print $2}' /usr/local/etc/xray/.keys)
+sid=$(awk -F': ' '/shortsid/ {print $2}' /usr/local/etc/xray/.keys)
+ip=$(curl -4 -s icanhazip.com)
+link="$protocol://$uuid@$ip:$port?security=reality&sni=$sni&fp=firefox&pbk=$pbk&sid=$sid&spx=/&type=tcp&flow=xtls-rprx-vision&encryption=none#$email"
+echo ""
+echo "Connection link:"
+echo "$link"
+echo ""
+echo "QR code:"
+echo "$link" | qrencode -t ansiutf8
+EOF
+chmod +x /usr/local/bin/newuser
+
+# rmuser
+cat << 'EOF' > /usr/local/bin/rmuser
+#!/bin/bash
+mapfile -t emails < <(jq -r '.inbounds[0].settings.clients[].email' /usr/local/etc/xray/config.json)
+
+[[ ${#emails[@]} -eq 0 ]] && { echo "No clients to remove."; exit 1; }
+
+echo "Client list:"
+for i in "${!emails[@]}"; do
+    echo "$((i+1)). ${emails[$i]}"
+done
+
+read -p "Enter client number to remove: " choice
+
+if ! [[ "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#emails[@]} )); then
+    echo "Error: number must be between 1 and ${#emails[@]}"
+    exit 1
+fi
+
+selected="${emails[$((choice-1))]}"
+
+tmp=$(mktemp)
+jq --arg email "$selected" \
+  '(.inbounds[0].settings.clients) |= map(select(.email != $email))' \
+  /usr/local/etc/xray/config.json > "$tmp" && mv "$tmp" /usr/local/etc/xray/config.json
+chmod 644 /usr/local/etc/xray/config.json
+systemctl restart xray
+echo "Client '$selected' removed."
+EOF
+chmod +x /usr/local/bin/rmuser
+
+# sharelink
+cat << 'EOF' > /usr/local/bin/sharelink
+#!/bin/bash
+mapfile -t emails < <(jq -r '.inbounds[0].settings.clients[].email' /usr/local/etc/xray/config.json)
+
+[[ ${#emails[@]} -eq 0 ]] && { echo "No clients found."; exit 1; }
+
+echo "Client list:"
+for i in "${!emails[@]}"; do
+    echo "$((i+1)). ${emails[$i]}"
+done
+
+read -p "Select client: " choice
+
+if ! [[ "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#emails[@]} )); then
+    echo "Error: number must be between 1 and ${#emails[@]}"
+    exit 1
+fi
+
+selected="${emails[$((choice-1))]}"
+uuid=$(jq -r --arg e "$selected" '.inbounds[0].settings.clients[] | select(.email == $e) | .id' /usr/local/etc/xray/config.json)
+protocol=$(jq -r '.inbounds[0].protocol' /usr/local/etc/xray/config.json)
+port=$(jq -r '.inbounds[0].port' /usr/local/etc/xray/config.json)
+sni=$(jq -r '.inbounds[0].streamSettings.realitySettings.serverNames[0]' /usr/local/etc/xray/config.json)
+pbk=$(awk -F': ' '/Password/ {print $2}' /usr/local/etc/xray/.keys)
+sid=$(awk -F': ' '/shortsid/ {print $2}' /usr/local/etc/xray/.keys)
+ip=$(curl -4 -s icanhazip.com)
+link="$protocol://$uuid@$ip:$port?security=reality&sni=$sni&fp=firefox&pbk=$pbk&sid=$sid&spx=/&type=tcp&flow=xtls-rprx-vision&encryption=none#$selected"
+echo ""
+echo "Connection link:"
+echo "$link"
+echo ""
+echo "QR code:"
+echo "$link" | qrencode -t ansiutf8
+EOF
+chmod +x /usr/local/bin/sharelink
+
+# trigger first user creation
+echo ""
+echo "Installation complete. Let's create your first user."
+newuser
