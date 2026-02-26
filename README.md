@@ -9,7 +9,7 @@ The ```wget``` package must be installed.
 wget -qO- https://raw.githubusercontent.com/not-dispersion/xray-core/refs/heads/main/xray-core-install | sudo bash
 ```
 ## User Management Commands
-All management commands must be executed with root privileges (sudo): \
+All management commands must be executed with root privileges (sudo):
 
 ```newuser``` - Add a new user \
 ```userlist``` - List all users \
@@ -18,4 +18,4 @@ All management commands must be executed with root privileges (sudo): \
 
 **IMPORTANT! Always run these commands as root to ensure they work correctly.**
 
-I'll add the uninstallation script in future updates. For now - have fun! 
+I'll add the uninstallation script in future updates.
