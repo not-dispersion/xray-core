@@ -16,8 +16,10 @@ fi
 
 # installing dependencies
 echo "Installing dependencies"
-apt update -y
-apt install qrencode curl jq -y
+apt-get update
+apt-get install -y qrencode curl jq
+apt-get autoremove -y
+apt-get clean
 
 # enabling BBR
 if sysctl net.ipv4.tcp_congestion_control | grep -q bbr; then
