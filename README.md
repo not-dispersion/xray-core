@@ -1,5 +1,5 @@
 # **Xray Core** (Minimal Setup)
-A fully automated, minimal installation script for Xray + Reality with TCP transport.
+A fully automated minimal Xray + REALITY installation script for Debian-based systems (TCP transport).
 No web panels. No unnecessary components. Just the core. \
 This script will also create management commands to easily handle users.
 ## Installation
@@ -11,10 +11,10 @@ wget -qO- https://raw.githubusercontent.com/not-dispersion/xray-core/refs/heads/
 ## User Management Commands
 All management commands must be executed with root privileges (sudo):
 
-```newuser``` - Add a new user \
-```userlist``` - List all users \
-```rmuser``` - Remove a user \
-```sharelink``` - Get connection link for existing user
+```newuser``` - add a new user \
+```userlist``` - list all users \
+```rmuser``` - remove a user \
+```sharelink``` - get connection link for existing user
 
 **IMPORTANT! Always run these commands as root to ensure they work correctly.**
 
