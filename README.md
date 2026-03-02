@@ -11,11 +11,11 @@ wget -qO- https://raw.githubusercontent.com/not-dispersion/xray-core/refs/heads/
 ## User Management Commands
 All management commands must be executed with root privileges (sudo):
 
-```newuser``` - add a new user \
 ```userlist``` - list all users \
+```newuser``` - add a new user \
 ```rmuser``` - remove a user \
 ```sharelink``` - get connection link for existing user
 
-**IMPORTANT! Always run these commands as root to ensure they work correctly.**
+**IMPORTANT! Always run ```newuser``` and ```rmuser``` as root to ensure they work correctly.**
 
 I'll add the uninstallation script in future updates.

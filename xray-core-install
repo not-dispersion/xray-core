@@ -126,6 +126,8 @@ systemctl enable xray
 # userlist
 cat << 'EOF' > /usr/local/bin/userlist
 #!/bin/bash
+set -euo pipefail
+
 mapfile -t emails < <(jq -r '.inbounds[0].settings.clients[].email' /usr/local/etc/xray/config.json)
 [[ ${#emails[@]} -eq 0 ]] && { echo "Error: No clients found."; exit 1; }
 echo "Client list:"
@@ -138,6 +140,10 @@ chmod +x /usr/local/bin/userlist
 # newuser
 cat << 'EOF' > /usr/local/bin/newuser
 #!/bin/bash
+set -euo pipefail
+
+[[ $EUID -eq 0 ]] || { echo "Error: Run as root."; exit 1; }
+
 read -p "Enter username (email): " email
 
 [[ -z "$email" || "$email" == *" "* ]] && { echo "Error: username cannot be empty or contain spaces."; exit 1; }
@@ -172,6 +178,10 @@ chmod +x /usr/local/bin/newuser
 # rmuser
 cat << 'EOF' > /usr/local/bin/rmuser
 #!/bin/bash
+set -euo pipefail
+
+[[ $EUID -eq 0 ]] || { echo "Error: Run as root."; exit 1; }
+
 mapfile -t emails < <(jq -r '.inbounds[0].settings.clients[].email' /usr/local/etc/xray/config.json)
 
 [[ ${#emails[@]} -eq 0 ]] && { echo "No clients to remove."; exit 1; }
@@ -203,6 +213,8 @@ chmod +x /usr/local/bin/rmuser
 # sharelink
 cat << 'EOF' > /usr/local/bin/sharelink
 #!/bin/bash
+set -euo pipefail
+
 mapfile -t emails < <(jq -r '.inbounds[0].settings.clients[].email' /usr/local/etc/xray/config.json)
 
 [[ ${#emails[@]} -eq 0 ]] && { echo "No clients found."; exit 1; }
@@ -238,5 +250,6 @@ EOF
 chmod +x /usr/local/bin/sharelink
 
 # trigger first user creation
+echo ""
 echo "Installation complete. Let's create your first user."
 newuser
