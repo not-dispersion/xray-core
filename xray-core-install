@@ -251,5 +251,4 @@ chmod +x /usr/local/bin/sharelink
 
 # trigger first user creation
 echo ""
-echo "Installation complete. Let's create your first user."
-newuser
+echo "Installation complete. Let's create your first user. Run: sudo newuser"
